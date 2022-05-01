@@ -7,10 +7,10 @@ log_in_file = 'usr.json'  # 储存字典： 用户名对应密码
 buffer_file = 'buffer.json'  # 储存字典： 用户名对应离线时接收到的聊天消息
 
 class Server:
-    HOST = ''
-    PORT = '50007'  # remain to be set
-    conn = []
-    addr = []
+    HOST = '127.0.0.1'
+    PORT = 50007   # remain to be set
+    conn = {}
+    addr = {}
     online_user = {}  # 在线用户和其对应socket类的字典
     buffer_data = {}  # 用户未登录时接收到的消息，字典中key值是用户名，每个用户对应的value
                       # 都是字符串组，每个字符串都是一条消息
@@ -30,7 +30,7 @@ class Server:
         try:  # 读取用户缓存的未接收到的消息信息
             buffer_f = open(buffer_file, 'r')
             self.buffer_data = json.load(buffer_f)
-        except FileNotFoundError:
+        except:
             buffer_f = open(buffer_file, 'w')  # 若未找到该文件，则创建该文件
         f.close()
         buffer_f.close()
@@ -66,9 +66,11 @@ class Server:
         """
         处理登录和注册信息，登录成功后进入chatting_thread函数，否则一直循环
         """
+        conn.sendall(b'-------Connected----------')
         fail_times = 0  # 用户输入错误密码的次数
         while self.quit_signal:
             log_in_data = conn.recv(512).decode('utf-8')
+            log_in_data+='*'
             if log_in_data[:4] == 'usr:':  # 用户登录
                 i = 4  # 格式：usr:knight password:123456*
                 user_name = ''
@@ -85,15 +87,14 @@ class Server:
                     if user_name in self.user_dictionary.keys():
                         if self.user_dictionary[user_name] == password:
                             # 验证成功，创建聊天线程
-                            conn.sendall('0'.encode('utf-8'))  # 登录成功
+                            conn.sendall('0login success'.encode('utf-8'))  # 登录成功
                             self.online_user[user_name] = conn
                             self.chatting_thread(conn, user_name)
                             # 登录成功后，从上方进入chatting_thread聊天程序
                             return  # chatting_thread结束后，函数退出
-                    conn.sendall('1'.encode('utf-8'))  # wrong password
+                    conn.sendall('1login failure!'.encode('utf-8'))  # wrong password
                     fail_times += 1
             elif log_in_data[:7] == 'signin:':  # 注册
-                log_in_data += '*'  # 补充了'*'
                 i = 7
                 user_name = ''
                 while log_in_data[i] != ' ':
@@ -107,21 +108,24 @@ class Server:
                         password += log_in_data[i]
                         i = i + 1
                     if user_name in self.user_dictionary.keys():
-                        conn.sendall('3'.encode('utf-8'))
+                        conn.sendall('3exists!'.encode('utf-8'))
                     else:
                         self.user_dictionary[user_name] = password
-                        self.buffer_data[user_name] = []
-                        conn.sendall('2'.encode('utf-8'))
+                        #self.buffer_data[user_name] = None
+                        conn.sendall('4signin success!'.encode('utf-8'))
 
     def chatting_thread(self, conn: socket.socket, user_name: str):
         """
         此函数在log_in函数中被调用，用来管理用户聊天信息的收发
         """
-        if self.buffer_data[user_name]:
-            # 当buffer_data[user_name]非空的时候，说明
-            # 该用户有离线未接收的消息，将其提取出来并发送给用户
-            for j in range(len(self.buffer_data[user_name])):
-                conn.sendall(self.buffer_data[user_name][j].encode('utf-8'))
+        try:
+            if self.buffer_data[user_name]:
+                # 当buffer_data[user_name]非空的时候，说明
+                # 该用户有离线未接收的消息，将其提取出来并发送给用户
+                for j in range(len(self.buffer_data[user_name])):
+                    conn.sendall(self.buffer_data[user_name][j].encode('utf-8'))
+        except:
+            conn.sendall(b'Inbox empty!')
         while self.quit_signal:
             # 开始从socket接受并处理
             recv_data = conn.recv(1024).decode('utf-8')
@@ -143,6 +147,7 @@ class Server:
                     i += 4
                     while recv_data[i] != '>':
                         msg_receive += recv_data[i]
+                        i+=1
                     if msg_to in self.online_user.keys():
                         # 如果用户在线，直接发送消息
                         self.online_user[msg_to].sendall(("<From:" + user_name
@@ -150,13 +155,13 @@ class Server:
                                                           '>').encode('utf-8'))
                     elif msg_to in self.user_dictionary.keys():
                         # 如果用户不在线，但是在已经注册的用户中，将其保存在缓存中
-                        self.buffer_data[msg_to].append("<From:" + user_name
-                                                        + " Msg:" + msg_receive +
-                                                        '>')
+                        self.buffer_data[msg_to]="<From:" + user_name+ " Msg:" + msg_receive +'>'
+
                     else:
                         # 用户不存在
                         conn.sendall("<The user {} doesn't exist>"
                                      .format(msg_to).encode('utf-8'))
+                    print('here')
                     if recv_data[i + 1:]:
                         # 递归调用函数，当从socket中接收到的信息中带有多条用户消息时
                         # 需要检查是否已经将这条消息中的所有用户消息遍历完
@@ -176,3 +181,6 @@ class Server:
             quit_char = input('需要退出的时候，在键盘上按下q键')
         self.quit_signal = 0
         return
+
+if __name__=="__main__":
+    server=Server()
