@@ -111,7 +111,8 @@ class Server:
                         conn.sendall('3exists!'.encode('utf-8'))
                     else:
                         self.user_dictionary[user_name] = password
-                        #self.buffer_data[user_name] = None
+                        self.buffer_data[user_name] = []
+                        # buffer_data -> [] 聊天信息可能会有多条，所以用字符串组存储
                         conn.sendall('4signin success!'.encode('utf-8'))
 
     def chatting_thread(self, conn: socket.socket, user_name: str):
@@ -155,7 +156,9 @@ class Server:
                                                           '>').encode('utf-8'))
                     elif msg_to in self.user_dictionary.keys():
                         # 如果用户不在线，但是在已经注册的用户中，将其保存在缓存中
-                        self.buffer_data[msg_to]="<From:" + user_name+ " Msg:" + msg_receive +'>'
+                        self.buffer_data[msg_to].append("<From:" + user_name+
+                                                        " Msg:" + msg_receive +
+                                                        '>')
 
                     else:
                         # 用户不存在
