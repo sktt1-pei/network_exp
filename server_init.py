@@ -5,6 +5,7 @@ import _socket
 
 log_in_file = 'usr.json'  # 储存字典： 用户名对应密码
 buffer_file = 'buffer.json'  # 储存字典： 用户名对应离线时接收到的聊天消息
+group_file = 'group.json'
 
 class Server:
     HOST = '127.0.0.1'
@@ -15,6 +16,8 @@ class Server:
     buffer_data = {}  # 用户未登录时接收到的消息，字典中key值是用户名，每个用户对应的value
                       # 都是字符串组，每个字符串都是一条消息
     user_dictionary = {}
+    group_dictionary = {}
+    # group name -> list of person
     quit_signal = 1  # 服务器退出时，该变量被置为0，用于多个线程间的协调
 
     def __init__(self):
@@ -32,8 +35,14 @@ class Server:
             self.buffer_data = json.load(buffer_f)
         except:
             buffer_f = open(buffer_file, 'w')  # 若未找到该文件，则创建该文件
+        try:  # 读取用户缓存的未接收到的消息信息
+            group_f = open(group_file, 'r')
+            self.group_dictionary = json.load(group_f)
+        except:
+            group_f = open(group_file, 'w')  # 若未找到该文件，则创建该文件
         f.close()
         buffer_f.close()
+        group_f.close()
         _thread.start_new_thread(self.get_quit_signal, ('control_thread',))
         # 此线程用于在用户输入q时,将self.quit_signal置为0，使下方循环退出
         while self.quit_signal:
@@ -60,6 +69,12 @@ class Server:
             buffer_f.close()
         except:
             print('聊天缓存存储失败！')
+        try:  # 存储用户缓存的未接收到的消息信息
+            group_f = open(group_file, 'w')
+            json.dump(self.group_dictionary,group_f)
+            group_f.close()
+        except:
+            print('群聊信息储存失败！')
         print('服务器已经退出')
 
     def log_in(self, threadName: str, conn: socket.socket, addr):
@@ -169,11 +184,33 @@ class Server:
                         # 递归调用函数，当从socket中接收到的信息中带有多条用户消息时
                         # 需要检查是否已经将这条消息中的所有用户消息遍历完
                         self.chatting_data(recv_data[i + 1:], user_name, conn)
-            if recv_data[0:4] == 'quit':
+            elif recv_data[0:4] == 'quit':
                 # 用户退出登录
                 self.online_user.pop(user_name)
                 conn.shutdown(_socket.SHUT_RDWR)
                 return
+
+            elif recv_data[0:10] == 'groupname:':
+                #创建群聊
+                i = 10
+                group_name = ''
+                name_list = [user_name]
+                while recv_data[i]!=' ':
+                    group_name += recv_data[i]
+                    i += 1
+                i+=1
+                while recv_data[i]!='*':
+                    name = ''
+                    while recv_data[i]!=',' and recv_data[i]!='*':
+                        name += recv_data[i]
+                        i += 1
+                    name_list.append(name)
+                    if recv_data[i] == ',':
+                        i+=1
+                self.group_dictionary[group_name] = name_list
+                self.send_group_set_up_msg(group_name)
+                if recv_data[i+1:]:
+                    self.chatting_data(recv_data[i + 1:], user_name, conn)
 
     def get_quit_signal(self, threadName):
         """
@@ -185,5 +222,22 @@ class Server:
         self.quit_signal = 0
         return
 
+    def send_group_set_up_msg(self,group_name:str):
+        #当群聊创建时，向创建人以及群聊中的其他用户发送信息
+        name_list = self.group_dictionary[group_name]
+        owner = name_list[0]
+        if owner in self.online_user.keys():
+            self.online_user[owner].sendall("创建完成".encode('utf-8'))
+        elif owner in self.user_dictionary.keys():
+            self.buffer_data[owner].append("创建完成")
+        for i in range(1,len(name_list)):
+            user = name_list[i]
+            if user in self.online_user.keys():
+                self.online_user[user].sendall("您已是{}中的一员".
+                                               format(group_name).
+                                               encode('utf-8'))
+            elif user in self.user_dictionary.keys():
+                self.buffer_data[user].append("您已是{}中的一员".
+                                              format(group_name))
 if __name__=="__main__":
     server=Server()
